@@ -1,0 +1,17 @@
+[package]
+name = "serde_millis"
+description = """
+    A serde wrapper that stores integer millisecond value for timestamps
+    and durations (used similarly to serde_bytes)
+"""
+license = "MIT/Apache-2.0"
+readme = "README.md"
+keywords = ["serde", "milliseconds", "timestamp", "duration", "serialization"]
+categories = ["encoding"]
+homepage = "https://github.com/tailhook/serde-millis"
+documentation = "https://docs.rs/serde_millis"
+version = "0.1.0"
+authors = ["paul@colomiets.name"]
+
+[dependencies]
+serde = "1.0.0"
