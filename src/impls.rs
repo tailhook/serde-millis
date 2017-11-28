@@ -1,45 +1,72 @@
 use std::time::{Duration, SystemTime, Instant, UNIX_EPOCH};
 
+use serde::ser::{Serialize, Serializer, Error as SerError};
+use serde::de::{Deserialize, Deserializer, Error as DeError};
 
 use traits::{Sealed, Milliseconds};
 
 
 impl Sealed for Duration {
-    fn to_millis(&self) -> Option<u64> {
+    fn encode<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
         self.as_secs().checked_mul(1000).and_then(|x| {
             x.checked_add((self.subsec_nanos()/1_000_000) as u64)
         })
+        .ok_or_else(|| S::Error::custom("duration value out of range"))
+        .and_then(|v| v.serialize(serializer))
     }
-    fn from_millis(val: u64) -> Option<Self> where Self: Sized {
-        Some(Duration::from_millis(val))
+    fn decode<'de, D>(deserializer: D) -> Result<Self, D::Error>
+        where Self: Sized,
+              D: Deserializer<'de>,
+    {
+        let val = Deserialize::deserialize(deserializer)?;
+        Ok(Duration::from_millis(val))
     }
 }
 impl Sealed for SystemTime {
-    fn to_millis(&self) -> Option<u64> {
-        self.duration_since(UNIX_EPOCH).ok().and_then(|x| x.to_millis())
+    fn encode<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        self.duration_since(UNIX_EPOCH)
+            .map_err(|_| S::Error::custom("invalid system time"))
+            .and_then(|x| x.encode(serializer))
     }
-    fn from_millis(val: u64) -> Option<Self> where Self: Sized {
-        Some(UNIX_EPOCH + Duration::from_millis(val))
+    fn decode<'de, D>(deserializer: D) -> Result<Self, D::Error>
+        where Self: Sized,
+              D: Deserializer<'de>,
+    {
+        let val = Duration::decode(deserializer)?;
+        Ok((UNIX_EPOCH + val))
     }
 }
 impl Sealed for Instant {
-    fn to_millis(&self) -> Option<u64> {
+    fn encode<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
         let inow = Instant::now();
         let snow = SystemTime::now();
         if *self < inow {
-            (snow - inow.duration_since(*self)).to_millis()
+            (snow - inow.duration_since(*self)).encode(serializer)
         } else {
-            (snow + self.duration_since(inow)).to_millis()
+            (snow + self.duration_since(inow)).encode(serializer)
         }
     }
-    fn from_millis(val: u64) -> Option<Self> where Self: Sized {
+    fn decode<'de, D>(deserializer: D) -> Result<Self, D::Error>
+        where Self: Sized,
+              D: Deserializer<'de>,
+    {
         let inow = Instant::now();
         let snow = SystemTime::now();
-        let stime = UNIX_EPOCH + Duration::from_millis(val);
+        let stime = UNIX_EPOCH + Duration::decode(deserializer)?;
         if stime > snow {
-            stime.duration_since(snow).ok().map(|x| inow + x)
+            stime.duration_since(snow)
+                .map_err(|_| D::Error::custom("instant out of range"))
+                .map(|x| inow + x)
         } else {
-            snow.duration_since(stime).ok().map(|x| inow - x)
+            snow.duration_since(stime)
+                .map_err(|_| D::Error::custom("instant out of range"))
+                .map(|x| inow - x)
         }
     }
 }
@@ -52,45 +79,56 @@ impl Milliseconds for Instant {}
 #[cfg(test)]
 mod test {
     use std::time::{Duration, SystemTime, Instant, UNIX_EPOCH};
-    use traits::Sealed;
+
+    use serde_json;
+
+    use traits::Milliseconds;
+
+    fn encode<V: Milliseconds>(v: V) -> String {
+        #[derive(Serialize)]
+        struct Data<V: Milliseconds>(#[serde(with="::funcs")]V);
+        serde_json::to_string(&Data(v)).unwrap()
+    }
+
+    fn decode<V: Milliseconds>(src: &str) -> V {
+        #[derive(Deserialize)]
+        struct Data<V: Milliseconds>(#[serde(with="::funcs")]V);
+        let data: Data<V> = serde_json::from_str(src).unwrap();
+        return data.0
+    }
 
     #[test]
     fn test_duration() {
-        assert_eq!(Duration::new(1, 0).to_millis(), Some(1000));
-        assert_eq!(Duration::new(1234, 0).to_millis(), Some(1234000));
-        assert_eq!(Duration::new(1, 2300000).to_millis(), Some(1002));
-        assert_eq!(<Duration as Sealed>::from_millis(1002),
-            Some(Duration::new(1, 2000000)));
-        assert_eq!(<Duration as Sealed>::from_millis(1000),
-            Some(Duration::new(1, 0)));
-        assert_eq!(<Duration as Sealed>::from_millis(1234000),
-            Some(Duration::new(1234, 0)));
+        assert_eq!(encode(Duration::new(1, 0)), "1000");
+        assert_eq!(encode(Duration::new(1234, 0)), "1234000");
+        assert_eq!(encode(Duration::new(1, 2300000)), "1002");
+        assert_eq!(decode::<Duration>("1002"), Duration::new(1, 2000000));
+        assert_eq!(decode::<Duration>("1000"), Duration::new(1, 0));
+        assert_eq!(decode::<Duration>("1234000"), Duration::new(1234, 0));
     }
 
     #[test]
     fn test_systemtime_past() {
-        assert_eq!(SystemTime::from_millis(
-            (UNIX_EPOCH + Duration::from_millis(1511885454870))
-            .to_millis().unwrap()).unwrap(),
-            UNIX_EPOCH + Duration::from_millis(1511885454870))
+        assert_eq!(encode(UNIX_EPOCH + Duration::from_millis(1511885454870)),
+            "1511885454870");
+        assert_eq!(decode::<SystemTime>("1511885454870"),
+            UNIX_EPOCH + Duration::from_millis(1511885454870));
     }
 
     #[test]
     fn test_systemtime_future() {
-        assert_eq!(SystemTime::from_millis(
-            (UNIX_EPOCH + Duration::from_millis(2147483647000))
-            .to_millis().unwrap()).unwrap(),
-            UNIX_EPOCH + Duration::from_millis(2147483647000))
+        assert_eq!(encode(UNIX_EPOCH + Duration::from_millis(2147483647000)),
+            "2147483647000");
+        assert_eq!(decode::<SystemTime>("2147483647000"),
+            UNIX_EPOCH + Duration::from_millis(2147483647000));
     }
 
     #[test]
     fn test_instant_past() {
         let early = Instant::now();
-        let converted = Instant::from_millis(
-            (Instant::now() - Duration::from_millis(2000))
-            .to_millis().unwrap()).unwrap();
+        let converted = decode::<Instant>(
+            &encode(Instant::now() - Duration::from_millis(2000)));
         let late = Instant::now();
-        println!("Conv {:?} {:?} {:?}", converted, early, late);
         assert!(converted >= early - Duration::from_millis(2002));
         assert!(converted <= late - Duration::from_millis(1998));
     }
@@ -98,9 +136,8 @@ mod test {
     #[test]
     fn test_instant_future() {
         let early = Instant::now();
-        let converted = Instant::from_millis(
-            (Instant::now() + Duration::from_millis(2000))
-            .to_millis().unwrap()).unwrap();
+        let converted = decode::<Instant>(
+            &encode(Instant::now() + Duration::from_millis(2000)));
         let late = Instant::now();
         println!("Conv {:?} {:?} {:?}", converted, early, late);
         assert!(converted >= early + Duration::from_millis(1998));

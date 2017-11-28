@@ -43,6 +43,9 @@
 #![warn(missing_debug_implementations)]
 extern crate serde;
 
+#[cfg(test)] extern crate serde_json;
+#[cfg(test)] #[macro_use] extern crate serde_derive;
+
 mod traits;
 mod funcs;
 mod impls;
