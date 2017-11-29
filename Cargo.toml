@@ -10,7 +10,7 @@ keywords = ["serde", "milliseconds", "timestamp", "duration", "serialization"]
 categories = ["encoding"]
 homepage = "https://github.com/tailhook/serde-millis"
 documentation = "https://docs.rs/serde_millis"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["paul@colomiets.name"]
 
 [dependencies]
