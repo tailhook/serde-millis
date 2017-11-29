@@ -1,7 +1,9 @@
+use std::fmt;
 use std::time::{Duration, SystemTime, Instant, UNIX_EPOCH};
+use std::marker::PhantomData;
 
 use serde::ser::{Serialize, Serializer, Error as SerError};
-use serde::de::{Deserialize, Deserializer, Error as DeError};
+use serde::de::{Deserialize, Deserializer, Error as DeError, Visitor};
 
 use traits::{Sealed, Milliseconds};
 
@@ -71,9 +73,72 @@ impl Sealed for Instant {
     }
 }
 
+impl<T: Sealed> Sealed for Option<T> {
+    fn encode<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        struct Data<'a, V: 'a>(&'a V) where V: Sealed;
+
+        impl<'a, V: Sealed + 'a> Serialize for Data<'a, V> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                where S: Serializer
+            {
+                self.0.encode(serializer)
+            }
+        }
+
+        match *self {
+            Some(ref value) => serializer.serialize_some(&Data(value)),
+            None => serializer.serialize_none(),
+        }
+    }
+    fn decode<'de, D>(deserializer: D) -> Result<Self, D::Error>
+        where Self: Sized,
+              D: Deserializer<'de>,
+    {
+        struct OptionVisitor<T> {
+            marker: PhantomData<T>,
+        }
+
+        impl<'de, T: Sealed> Visitor<'de> for OptionVisitor<T> {
+            type Value = Option<T>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result
+            {
+                formatter.write_str("option")
+            }
+
+            #[inline]
+            fn visit_unit<E>(self) -> Result<Option<T>, E>
+                where E: DeError,
+            {
+                Ok(None)
+            }
+
+            #[inline]
+            fn visit_none<E>(self) -> Result<Option<T>, E>
+                where E: DeError,
+            {
+                Ok(None)
+            }
+
+            #[inline]
+            fn visit_some<D>(self, deserializer: D)
+                -> Result<Option<T>, D::Error>
+                where D: Deserializer<'de>,
+            {
+                T::decode(deserializer).map(Some)
+            }
+        }
+
+        deserializer.deserialize_option(OptionVisitor { marker: PhantomData })
+    }
+}
+
 impl Milliseconds for Duration {}
 impl Milliseconds for SystemTime {}
 impl Milliseconds for Instant {}
+impl<T: Milliseconds> Milliseconds for Option<T> {}
 
 
 #[cfg(test)]
@@ -139,9 +204,40 @@ mod test {
         let converted = decode::<Instant>(
             &encode(Instant::now() + Duration::from_millis(2000)));
         let late = Instant::now();
-        println!("Conv {:?} {:?} {:?}", converted, early, late);
         assert!(converted >= early + Duration::from_millis(1998));
         assert!(converted <= late + Duration::from_millis(2002));
     }
 
+    #[test]
+    fn test_option() {
+        assert_eq!(encode(Some(Duration::new(1, 0))), "1000");
+        assert_eq!(encode(None::<Duration>), "null");
+        assert_eq!(decode::<Option<Duration>>("null"), None);
+        assert_eq!(decode::<Option<Duration>>("1000"),
+            Some(Duration::new(1, 0)));
+        assert_eq!(encode(Some(
+            UNIX_EPOCH + Duration::from_millis(1511885454870))),
+            "1511885454870");
+        assert_eq!(encode(None::<SystemTime>), "null");
+        assert_eq!(decode::<Option<SystemTime>>("null"), None);
+        assert_eq!(decode::<Option<SystemTime>>("1511885454870"),
+            Some(UNIX_EPOCH + Duration::from_millis(1511885454870)));
+
+        let early = SystemTime::now();
+        let converted = decode::<Option<SystemTime>>(
+            &encode(Some(Instant::now())));
+        let later = SystemTime::now();
+        assert!(converted.unwrap() >= early - Duration::from_millis(1));
+        assert!(converted.unwrap() <= later);
+
+        let early = Instant::now();
+        let converted = decode::<Option<Instant>>(
+            &encode(Some(SystemTime::now())));
+        let later = Instant::now();
+        assert!(converted.unwrap() >= early - Duration::from_millis(1));
+        assert!(converted.unwrap() <= later);
+
+        let converted = decode::<Option<Instant>>("null");
+        assert!(converted.is_none());
+    }
 }
