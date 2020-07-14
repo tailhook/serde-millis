@@ -39,9 +39,13 @@
 //! #
 //! # fn main() {}
 //! ```
+
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
+
+#[cfg(feature = "chrono")] extern crate chrono;
 extern crate serde;
+#[cfg(feature = "time")] extern crate time;
 
 #[cfg(test)] extern crate serde_json;
 #[cfg(test)] #[macro_use] extern crate serde_derive;

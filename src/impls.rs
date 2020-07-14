@@ -1,3 +1,6 @@
+#[cfg(feature = "chrono")] mod chrono;
+#[cfg(feature = "time")] mod time;
+
 use std::fmt;
 use std::time::{Duration, SystemTime, Instant, UNIX_EPOCH};
 use std::marker::PhantomData;

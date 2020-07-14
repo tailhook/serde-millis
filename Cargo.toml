@@ -14,8 +14,16 @@ version = "0.1.1"
 authors = ["paul@colomiets.name"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, optional = true }
 serde = "1.0.0"
+time = { version = "0.2", default-features = false, optional = true }
 
 [dev-dependencies]
 serde_derive = "1.0.0"
 serde_json = "1.0.0"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.playground]
+all-features = true
