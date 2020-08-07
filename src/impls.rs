@@ -12,11 +12,7 @@ impl Sealed for Duration {
     fn encode<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where S: Serializer
     {
-        self.as_secs().checked_mul(1000).and_then(|x| {
-            x.checked_add((self.subsec_nanos()/1_000_000) as u64)
-        })
-        .ok_or_else(|| S::Error::custom("duration value out of range"))
-        .and_then(|v| v.serialize(serializer))
+        self.as_millis().serialize(serializer)
     }
     fn decode<'de, D>(deserializer: D) -> Result<Self, D::Error>
         where Self: Sized,
@@ -39,7 +35,7 @@ impl Sealed for SystemTime {
               D: Deserializer<'de>,
     {
         let val = Duration::decode(deserializer)?;
-        Ok((UNIX_EPOCH + val))
+        Ok(UNIX_EPOCH + val)
     }
 }
 impl Sealed for Instant {
